@@ -2,72 +2,75 @@ import requests
 import re
 import os
 import json
+import time
 
-def run_bot():
-    print("🚀 Starting Santali Bot (Strict Punctuation Filtering)...")
+def run_deep_scrape():
+    print("🚀 Starting Deep Crawl for Santali Words...")
     
-    # Updated Regex: Range 1C50-1C7D 
-    # This specifically stops before 1C7E (᱾) and 1C7F (᱿)
+    # Strictly Ol Chiki letters (excludes punctuation ᱾ and ᱿)
     ol_chiki_pattern = re.compile(r'[\u1C50-\u1C7D]+')
-    
-    headers = {
-        'User-Agent': 'SantaliWordBot/1.0 (Linguistic Research; professor@santals.in)'
-    }
-    
+    headers = {'User-Agent': 'SantaliDeepBot/1.0 (Linguistic Research; professor@santals.in)'}
     wiki_url = "https://sat.wikipedia.org/w/api.php"
-    
-    # Sources: Recent changes and general search
-    params_list = [
-        {"action": "query", "list": "recentchanges", "rclimit": "100", "format": "json"},
-        {"action": "query", "list": "search", "srsearch": "ᱥᱟᱱᱛᱟᱲᱤ", "srlimit": "100", "format": "json"}
-    ]
     
     found_words = set()
 
-    for params in params_list:
-        try:
-            response = requests.get(wiki_url, params=params, headers=headers, timeout=15)
-            if response.status_code == 200:
-                data = response.json()
-                
-                # Extract from Recent Changes
-                if 'recentchanges' in data.get('query', {}):
-                    for item in data['query']['recentchanges']:
-                        # Extract and immediately clean
-                        raw_found = ol_chiki_pattern.findall(item['title'])
-                        for word in raw_found:
-                            # .strip() removes characters from BOTH beginning and end
-                            found_words.add(word.strip('᱾᱿'))
-                
-                # Extract from Search Results
-                if 'search' in data.get('query', {}):
-                    for item in data['query']['search']:
-                        text_blob = item['title'] + " " + item['snippet']
-                        raw_found = ol_chiki_pattern.findall(text_blob)
-                        for word in raw_found:
-                            found_words.add(word.strip('᱾᱿'))
-            else:
-                print(f"⚠️ Server status: {response.status_code}")
-        except Exception as e:
-            print(f"❌ Error during fetch: {e}")
+    # 1. Get all page titles (up to 500 per request)
+    print("📋 Fetching article index...")
+    list_params = {
+        "action": "query",
+        "format": "json",
+        "list": "allpages",
+        "aplimit": "500" 
+    }
+    
+    try:
+        r = requests.get(wiki_url, params=list_params, headers=headers)
+        pages = r.json().get('query', {}).get('allpages', [])
+        titles = [p['title'] for p in pages]
+        print(f"✅ Found {len(titles)} pages. Starting deep text extraction...")
 
-    # Handling the Wordlist
+        # 2. Fetch full text for these pages in batches of 50
+        for i in range(0, len(titles), 50):
+            batch = titles[i:i+50]
+            print(f"📖 Scraping batch {i//50 + 1}...")
+            
+            content_params = {
+                "action": "query",
+                "prop": "extracts",
+                "explaintext": True,
+                "titles": "|".join(batch),
+                "format": "json"
+            }
+            
+            res = requests.get(wiki_url, params=content_params, headers=headers)
+            page_data = res.json().get('query', {}).get('pages', {})
+            
+            for p_id in page_data:
+                text = page_data[p_id].get('extract', '')
+                if text:
+                    # Extract and clean every word
+                    raw_extracted = ol_chiki_pattern.findall(text)
+                    for word in raw_extracted:
+                        clean_word = word.strip('᱾᱿')
+                        if len(clean_word) > 1:
+                            found_words.add(clean_word)
+            
+            # Small delay to be polite to Wikipedia servers
+            time.sleep(1)
+
+    except Exception as e:
+        print(f"❌ Error: {e}")
+
+    # 3. Merge with existing wordlist
     final_file = "santali_wordlist.txt"
     existing_words = set()
-    
     if os.path.exists(final_file):
         with open(final_file, "r", encoding="utf-8") as f:
             existing_words = set(line.strip() for line in f if line.strip())
 
-    # Final Filter: Min length 2 and ensure no punctuation exists
-    new_clean_words = set()
-    for w in found_words:
-        clean_w = w.strip('᱾᱿')
-        if len(clean_w) > 1:
-            new_clean_words.add(clean_w)
+    all_words = sorted(list(found_words | existing_words))
 
-    all_words = sorted(list(new_clean_words | existing_words))
-
+    # 4. Save results
     if all_words:
         with open(final_file, "w", encoding="utf-8") as f:
             f.write("\n".join(all_words))
@@ -75,9 +78,9 @@ def run_bot():
         with open("stats.json", "w") as f:
             json.dump({"word_count": len(all_words)}, f)
             
-        print(f"✅ Success! Total words: {len(all_words)}")
+        print(f"🎉 Success! Database now contains {len(all_words)} unique words.")
     else:
-        print("⚠️ No words found yet. Run the Action manually to test.")
+        print("⚠️ No words extracted. Verify Wikipedia connectivity.")
 
 if __name__ == "__main__":
-    run_bot()
+    run_deep_scrape()
