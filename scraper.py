@@ -4,10 +4,10 @@ import os
 import json
 
 def run_bot():
-    print("🚀 Starting Santali Bot (Punctuation Filtered)...")
+    print("🚀 Starting Santali Bot (Strict Punctuation Filtering)...")
     
-    # Updated Regex: Range 1C50-1C7F but EXCLUDING 1C7E (᱾) and 1C7F (᱿)
-    # This pattern matches only actual letters.
+    # Updated Regex: Range 1C50-1C7D 
+    # This specifically stops before 1C7E (᱾) and 1C7F (᱿)
     ol_chiki_pattern = re.compile(r'[\u1C50-\u1C7D]+')
     
     headers = {
@@ -30,18 +30,24 @@ def run_bot():
             if response.status_code == 200:
                 data = response.json()
                 
-                # Process Recent Changes
+                # Extract from Recent Changes
                 if 'recentchanges' in data.get('query', {}):
                     for item in data['query']['recentchanges']:
-                        found_words.update(ol_chiki_pattern.findall(item['title']))
+                        # Extract and immediately clean
+                        raw_found = ol_chiki_pattern.findall(item['title'])
+                        for word in raw_found:
+                            # .strip() removes characters from BOTH beginning and end
+                            found_words.add(word.strip('᱾᱿'))
                 
-                # Process Search Results
+                # Extract from Search Results
                 if 'search' in data.get('query', {}):
                     for item in data['query']['search']:
                         text_blob = item['title'] + " " + item['snippet']
-                        found_words.update(ol_chiki_pattern.findall(text_blob))
+                        raw_found = ol_chiki_pattern.findall(text_blob)
+                        for word in raw_found:
+                            found_words.add(word.strip('᱾᱿'))
             else:
-                print(f"⚠️ Wikipedia Server returned status: {response.status_code}")
+                print(f"⚠️ Server status: {response.status_code}")
         except Exception as e:
             print(f"❌ Error during fetch: {e}")
 
@@ -53,10 +59,9 @@ def run_bot():
         with open(final_file, "r", encoding="utf-8") as f:
             existing_words = set(line.strip() for line in f if line.strip())
 
-    # Filter: 1. Keep only Ol Chiki letters. 2. Min length 2. 3. Strip punctuation if it slipped through.
+    # Final Filter: Min length 2 and ensure no punctuation exists
     new_clean_words = set()
     for w in found_words:
-        # Extra safety: remove punctuation characters if they are at the ends
         clean_w = w.strip('᱾᱿')
         if len(clean_w) > 1:
             new_clean_words.add(clean_w)
@@ -67,13 +72,12 @@ def run_bot():
         with open(final_file, "w", encoding="utf-8") as f:
             f.write("\n".join(all_words))
         
-        # Save count for your Hugging Face Badge
         with open("stats.json", "w") as f:
             json.dump({"word_count": len(all_words)}, f)
             
-        print(f"✅ Success! Total words in database: {len(all_words)}")
+        print(f"✅ Success! Total words: {len(all_words)}")
     else:
-        print("⚠️ No new words found. Check if Wikipedia is reachable.")
+        print("⚠️ No words found yet. Run the Action manually to test.")
 
 if __name__ == "__main__":
     run_bot()
